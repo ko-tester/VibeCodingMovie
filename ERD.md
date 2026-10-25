@@ -52,6 +52,7 @@
 | `movie_code` | `TEXT` | PK 일부, FK → `movies.movie_code`, NOT NULL | 영화 |
 | `rank` | `SMALLINT` | NOT NULL, CHECK (`rank > 0`) | 해당 조회의 순위 |
 | `revenue` | `BIGINT` | NOT NULL, CHECK (`revenue >= 0`) | 기간 매출액(원) |
+| `total_revenue` | `BIGINT` | NOT NULL, CHECK (`total_revenue >= 0`) | 누적 매출액(원) |
 | `audience` | `BIGINT` | NOT NULL, CHECK (`audience >= 0`) | 기간 관객수(명) |
 | `total_audience` | `BIGINT` | NOT NULL, CHECK (`total_audience >= 0`) | 누적 관객수(명) |
 | `(period_id, movie_code)` | — | PK | 한 조회 스냅샷에서 같은 영화를 한 번만 저장 |
@@ -86,6 +87,7 @@ erDiagram
         TEXT movie_code PK, FK
         SMALLINT rank
         BIGINT revenue
+        BIGINT total_revenue
         BIGINT audience
         BIGINT total_audience
     }
@@ -114,12 +116,12 @@ erDiagram
 
 ### `box_office_results`
 
-| period_id | movie_code | rank | revenue | audience | total_audience |
-|---:|---|---:|---:|---:|---:|
-| 101 | M001 | 1 | 100000000 | 10000 | 500000 |
-| 101 | M002 | 2 | 70000000 | 7000 | 300000 |
-| 102 | M002 | 1 | 120000000 | 12000 | 312000 |
-| 102 | M001 | 2 | 90000000 | 9000 | 509000 |
+| period_id | movie_code | rank | revenue | total_revenue | audience | total_audience |
+|---:|---|---:|---:|---:|---:|---:|
+| 101 | M001 | 1 | 100000000 | 800000000 | 10000 | 500000 |
+| 101 | M002 | 2 | 70000000 | 400000000 | 7000 | 300000 |
+| 102 | M002 | 1 | 120000000 | 520000000 | 12000 | 312000 |
+| 102 | M001 | 2 | 90000000 | 890000000 | 9000 | 509000 |
 
 `period_id=103`은 존재하지만 이를 참조하는 실적 행은 없다. 이 조합은 “9월 6일 조회 성공, 결과 없음”을 표현하며 API 장애나 수집 실패와 구분된다.
 
@@ -134,6 +136,7 @@ SELECT
     m.movie_name,
     m.release_date,
     r.revenue,
+    r.total_revenue,
     r.audience,
     r.total_audience,
     p.source,
