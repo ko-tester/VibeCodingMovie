@@ -13,10 +13,9 @@ const films = [
 ];
 const $ = (id) => document.getElementById(id);
 const paramsOnLoad = new URLSearchParams(window.location.search);
-const state = {period:"daily",scenario:"auto",mode:"unknown",range:7,top:5,toastTimer:null,controller:null,requestId:0,insightController:null,insightRequestId:0,insightData:null,insightKey:null};
+const state = {period:"daily",scenario:"auto",mode:"unknown",range:7,toastTimer:null,controller:null,requestId:0,insightController:null,insightRetryControllers:new Map(),insightRequestId:0,insightEntries:[],insightKey:null};
 const fmt = new Intl.NumberFormat("ko-KR");
 const won = (value) => `₩ ${fmt.format(value)}`;
-const compactWon = (value) => value >= 100000000 ? `₩ ${(value/100000000).toFixed(0)}억` : `₩ ${fmt.format(Math.round(value))}`;
 const num = (value) => {
   if (typeof value !== "string" || !/^\d+$/.test(value)) throw new Error("잘못된 샘플 수치입니다.");
   const parsed = Number(value);
@@ -140,113 +139,212 @@ async function runQuery() {
     emptyPanel("error","",error.message);
   }
 }
-function chartSeries(days) {
-  return Array.from({length:days},(_,i) => {
-    const wave=Math.sin((i+2)*1.71)*.22+Math.cos(i*.57)*.14;
-    const weekend=(i%7===5||i%7===6)?.22:0;
-    return Math.max(.15,.48+wave+weekend+(i/days)*.12);
-  });
-}
-function renderDemoInsights() {
-  const series=chartSeries(state.range); const total=series.reduce((a,b)=>a+b,0)*1000000000;
-  const audience=Math.round(series.reduce((a,b)=>a+b,0)*210000);
-  $("chartTotal").textContent=won(total); $("periodAudience").textContent=`${fmt.format(audience)}명`; $("averageRevenue").textContent=won(total/state.range);
-  const chart=$("revenueChart"); chart.replaceChildren(); const max=Math.max(...series);
-  series.forEach((value,index)=>{const wrap=document.createElement("div");wrap.className="bar-wrap";const bar=document.createElement("div");bar.className=`bar ${index===series.length-1?"current":""}`;bar.style.height=`${Math.max(12,value/max*94)}%`;bar.title=`${state.range-index-1}일 전 · ${won(value*1000000000)}`;wrap.append(bar);chart.append(wrap);});
-  const labels=$("chartLabels");labels.replaceChildren();const count=state.range===7?7:state.range===14?7:6;
-  for(let i=0;i<count;i++){const label=document.createElement("span");label.textContent=state.range===7?`${i+18}일`:`${Math.round(i*(state.range-1)/(count-1))+1}일 전`;labels.append(label);}
-  const sorted=films.map(film=>({...film,periodRevenue:Math.round(num(film.revenue)*state.range*.82),periodAudience:Math.round(num(film.audience)*state.range*.87)})).sort((a,b)=>b.periodRevenue-a.periodRevenue).slice(0,state.top);
-  const tbody=$("topRows");tbody.replaceChildren();const allRevenue=films.reduce((sum,film)=>sum+num(film.revenue)*state.range*.82,0);
-  sorted.forEach((film,index)=>{const tr=document.createElement("tr");const share=film.periodRevenue/allRevenue*100;tr.innerHTML=`<td><span class="rank-badge ${rankClass(index+1)}">${index+1}</span></td><td><div class="movie-cell"><div class="poster p${index+1}">${film.tag}</div><div><div class="movie-name"></div><div class="movie-meta"></div></div></div></td><td class="numeric revenue">${won(film.periodRevenue)}</td><td class="numeric">${fmt.format(film.periodAudience)}명</td><td><div class="share-cell"><span>${share.toFixed(1)}%</span><div class="share-track"><div class="share-fill" style="width:${share}%"></div></div></div></td>`;tr.querySelector(".movie-name").textContent=film.title;tr.querySelector(".movie-meta").textContent=film.genre;tbody.append(tr);});
-}
 function setInsightStatus(message="",kind="") {
   const status=$("insightStatus");
   status.hidden=!message;
   status.textContent=message;
   status.dataset.kind=kind;
 }
-function drawLiveInsights(payload) {
-  const {series,topMovies,summary:totals}=payload.data;
-  if(!Array.isArray(series)||!Array.isArray(topMovies)||!totals) throw new Error("인사이트 응답 형식이 올바르지 않습니다.");
-  const values=series.map(day=>toInteger(day.revenue));
-  const totalRevenue=toInteger(totals.totalRevenue);
-  const totalAudience=toInteger(totals.totalAudience);
-  const averageRevenue=toInteger(totals.averageRevenue);
-  $("chartTotal").textContent=won(totalRevenue);
-  $("periodAudience").textContent=`${fmt.format(totalAudience)}명`;
-  $("averageRevenue").textContent=won(averageRevenue);
-  $("insightsView").querySelector(".insight-date span").textContent=`${payload.meta.rangeStart} — ${payload.meta.rangeEnd}`;
-  $("insightsView").querySelector(".insight-controls p").textContent="KOBIS 일별 Top 10 매출 합계";
-  const change=$("insightsView").querySelector(".chart-change");
-  change.textContent="일별 매출";
-  const changeNote=document.createElement("small"); changeNote.textContent="KOBIS Top 10 합계"; change.append(changeNote);
-  const chart=$("revenueChart"); chart.replaceChildren();
-  const max=Math.max(...values,1);
-  series.forEach((day,index)=>{
-    const wrap=document.createElement("div"); wrap.className="bar-wrap";
-    const bar=document.createElement("div"); bar.className=`bar ${index===series.length-1?"current":""}`;
-    bar.style.height=`${Math.max(1,values[index]/max*94)}%`;
-    bar.title=`${day.date} · ${won(values[index])}`;
-    wrap.append(bar); chart.append(wrap);
+function insightDates(endDate,days) {
+  const end=new Date(`${endDate}T00:00:00Z`);
+  return Array.from({length:days},(_,index)=>{
+    const day=new Date(end); day.setUTCDate(end.getUTCDate()-days+1+index);
+    return day.toISOString().slice(0,10);
   });
-  const yLabels=document.querySelectorAll(".y-labels span");
-  yLabels.forEach((label,index)=>{label.textContent=compactWon(max*(3-index)/3);});
+}
+function svgNode(name,attributes={}) {
+  const element=document.createElementNS("http://www.w3.org/2000/svg",name);
+  for(const [key,value] of Object.entries(attributes)) element.setAttribute(key,String(value));
+  return element;
+}
+function amountInUnit(value,divisor,unit) {
+  const tenths=(value*10n+divisor/2n)/divisor;
+  return `${fmt.format(Number(tenths)/10)} ${unit}`;
+}
+function revenueLabel(value) { return amountInUnit(value,100000000n,"억원"); }
+function audienceLabel(value) { return amountInUnit(value,1000n,"천명"); }
+function entryCounts() {
+  const counts={normal:0,empty:0,failed:0,loading:0,pending:0};
+  for(const entry of state.insightEntries) counts[entry.status]=(counts[entry.status]||0)+1;
+  return counts;
+}
+function renderInsightProgress(currentDate=null) {
+  const entries=state.insightEntries; const counts=entryCounts();
+  const done=counts.normal+counts.empty+counts.failed;
+  const total=entries.length||state.range;
+  $("insightProgress").max=total; $("insightProgress").value=done;
+  $("progressValue").textContent=`${done} / ${total}일`;
+  $("progressLabel").textContent=currentDate?`조회 중 · ${currentDate}`:done===total&&counts.failed===0&&counts.empty===0?"모든 날짜 정상 조회 완료":done===total?"조회 완료 · 확인이 필요한 날짜가 있습니다":"조회 대기";
+  $("countNormal").textContent=counts.normal; $("countEmpty").textContent=counts.empty;
+  $("countFailed").textContent=counts.failed; $("countLoading").textContent=counts.loading;
+  $("countPending").textContent=counts.pending;
+  const list=$("insightDays"); list.replaceChildren();
+  for(const entry of entries) {
+    const item=document.createElement("li"); item.className=`day-status-item status-${entry.status}`;
+    const date=document.createElement("time"); date.dateTime=entry.date; date.textContent=entry.date;
+    const status=document.createElement("span"); status.className="day-status-label";
+    status.textContent=({normal:"정상",empty:"빈 날짜",failed:"실패",loading:"조회 중",pending:"대기"})[entry.status];
+    item.append(date,status);
+    if(entry.error){const error=document.createElement("small");error.textContent=entry.error;item.append(error);}
+    if(entry.status==="failed") {const retry=document.createElement("button");retry.type="button";retry.className="day-retry";retry.dataset.retryDate=entry.date;retry.textContent="이 날짜만 다시 조회";item.append(retry);}
+    list.append(item);
+  }
+}
+function makeLineChart() {
+  const svg=$("revenueChart"); svg.replaceChildren();
+  const width=760,height=250,left=62,right=18,top=18,bottom=24;
+  const plotWidth=width-left-right,plotHeight=height-top-bottom;
+  const entries=state.insightEntries;
+  const points=entries.map((entry,index)=>({entry,index,value:entry.status==="normal"?entry.revenue:null}));
+  const values=points.filter(point=>point.value!==null).map(point=>Number(point.value)/100000000);
+  const max=Math.max(1,...values);
+  for(let tick=0;tick<=2;tick++) {
+    const y=top+plotHeight*tick/2;
+    svg.append(svgNode("line",{x1:left,y1:y,x2:width-right,y2:y,class:"chart-gridline"}));
+    const label=svgNode("text",{x:left-9,y:y+4,"text-anchor":"end",class:"chart-axis-label"});
+    label.textContent=`${(max*(2-tick)/2).toFixed(1)}억`; svg.append(label);
+  }
+  const xFor=index=>entries.length<=1?left+plotWidth/2:left+plotWidth*index/(entries.length-1);
+  const yFor=value=>top+plotHeight*(1-(Number(value)/100000000)/max);
+  let segment=[];
+  const flush=()=>{
+    if(segment.length>1) svg.append(svgNode("path",{d:segment.map((point,index)=>`${index?"L":"M"}${point.x},${point.y}`).join(" "),class:"revenue-line"}));
+    segment=[];
+  };
+  for(const point of points) {
+    if(point.value===null){flush();continue;}
+    const x=xFor(point.index),y=yFor(point.value); segment.push({x,y});
+    const circle=svgNode("circle",{cx:x,cy:y,r:4,class:"revenue-point"});
+    const title=svgNode("title");title.textContent=`${point.entry.date} · ${revenueLabel(point.value)}`;circle.append(title);svg.append(circle);
+  }
+  flush();
   const labels=$("chartLabels"); labels.replaceChildren();
-  const tickCount=Math.min(7,series.length);
-  for(let index=0;index<tickCount;index++){
-    const dataIndex=tickCount===1?0:Math.round(index*(series.length-1)/(tickCount-1));
-    const label=document.createElement("span"); label.textContent=series[dataIndex].date.slice(5); labels.append(label);
+  const tickCount=Math.min(7,entries.length);
+  for(let index=0;index<tickCount;index++) {
+    const dataIndex=tickCount===1?0:Math.round(index*(entries.length-1)/(tickCount-1));
+    const label=document.createElement("span");label.textContent=entries[dataIndex].date.slice(5);labels.append(label);
   }
-  const tbody=$("topRows"); tbody.replaceChildren();
-  topMovies.slice(0,state.top).forEach((movie,index)=>{
-    const tr=document.createElement("tr");
-    const rank=document.createElement("td"); const badge=document.createElement("span"); badge.className=`rank-badge ${rankClass(index+1)}`; badge.textContent=String(index+1); rank.append(badge);
-    const movieCell=document.createElement("td"); const wrap=document.createElement("div"); wrap.className="movie-cell";
-    const poster=document.createElement("div"); poster.className=`poster p${index+1}`; poster.textContent=movie.title.slice(0,1);
-    const details=document.createElement("div"); const name=document.createElement("div"); name.className="movie-name"; name.textContent=movie.title;
-    const meta=document.createElement("div"); meta.className="movie-meta"; meta.textContent=movie.releaseDate?`개봉 ${movie.releaseDate}`:"";
-    details.append(name,meta); wrap.append(poster,details); movieCell.append(wrap);
-    const revenue=document.createElement("td"); revenue.className="numeric revenue"; revenue.textContent=won(toInteger(movie.revenue));
-    const audience=document.createElement("td"); audience.className="numeric"; audience.textContent=`${fmt.format(toInteger(movie.audience))}명`;
-    const shareCell=document.createElement("td"); const shareWrap=document.createElement("div"); shareWrap.className="share-cell";
-    const shareText=document.createElement("span"); shareText.textContent=`${(Number(movie.share)*100).toFixed(1)}%`;
-    const track=document.createElement("div"); track.className="share-track"; const fill=document.createElement("div"); fill.className="share-fill"; fill.style.width=`${Math.max(0,Math.min(100,Number(movie.share)*100))}%`;
-    track.append(fill); shareWrap.append(shareText,track); shareCell.append(shareWrap); tr.append(rank,movieCell,revenue,audience,shareCell); tbody.append(tr);
+  if(values.length===0) {
+    const label=svgNode("text",{x:width/2,y:height/2,"text-anchor":"middle",class:"chart-empty-label"});
+    label.textContent="표시할 정상 관측 날짜가 없습니다";svg.append(label);
+  }
+}
+function drawTopMovieChart(available) {
+  const chart=$("topMoviesChart"),placeholder=$("topMoviesPlaceholder"); chart.replaceChildren();
+  placeholder.hidden=available;
+  if(!available) return;
+  const totals=new Map();
+  for(const entry of state.insightEntries) for(const movie of entry.movies) {
+    const movieCode=String(movie.movieCode);
+    const current=totals.get(movieCode)||{movieCode,title:movie.title,revenue:0n};
+    current.revenue+=BigInt(toInteger(movie.revenue));
+    if(movie.title) current.title=movie.title;
+    totals.set(movieCode,current);
+  }
+  const ranked=[...totals.values()].sort((a,b)=>a.revenue===b.revenue?a.title.localeCompare(b.title,"ko"):a.revenue>b.revenue?-1:1).slice(0,5);
+  const max=ranked[0]?.revenue||1n;
+  ranked.forEach((movie,index)=>{
+    const row=document.createElement("div");row.className="top-movie-row";
+    const label=document.createElement("div");label.className="top-movie-label";
+    const rank=document.createElement("span");rank.className=`top-movie-rank rank-${index+1}`;rank.textContent=String(index+1);
+    const name=document.createElement("span");name.textContent=movie.title;name.title=`${movie.title} · ${movie.movieCode}`;
+    const value=document.createElement("strong");value.textContent=revenueLabel(movie.revenue);
+    label.append(rank,name,value);
+    const track=document.createElement("div");track.className="top-movie-track";
+    const bar=document.createElement("div");bar.className="top-movie-fill";bar.style.width=`${Number(movie.revenue*10000n/max)/100}%`;track.append(bar);
+    row.append(label,track);chart.append(row);
   });
-  if(payload.meta?.warning?.message) setInsightStatus(payload.meta.warning.message,"warning");
-  else setInsightStatus(totalRevenue===0?"선택한 기간에 집계할 KOBIS Top 10 박스오피스 기록이 없습니다.":"");
 }
-async function loadLiveInsights() {
-  const endDate=$("dateInput").value;
-  const key=`${endDate}:${state.range}`;
-  if(state.insightData&&state.insightKey===key){drawLiveInsights(state.insightData);return;}
-  if(state.insightController) state.insightController.abort();
-  const requestId=++state.insightRequestId;
-  state.insightController=new AbortController();
-  state.insightData=null;
-  setInsightStatus(`KOBIS에서 최근 ${state.range}일 자료를 조회하고 있습니다. 날짜별 데이터를 모으는 데 잠시 걸릴 수 있습니다.`,"loading");
-  $("chartTotal").textContent="조회 중"; $("periodAudience").textContent="조회 중"; $("averageRevenue").textContent="조회 중";
-  $("revenueChart").replaceChildren(); $("topRows").replaceChildren();
-  try {
-    const params=new URLSearchParams({endDate,days:String(state.range),limit:"10"});
-    const response=await fetch(`/api/insights?${params.toString()}`,{signal:state.insightController.signal,cache:"no-store"});
-    const payload=await response.json();
-    if(requestId!==state.insightRequestId)return;
-    if(!response.ok) {const error=new Error(payload.error?.message||"인사이트 조회에 실패했습니다.");error.warning=payload.meta?.warning;throw error;}
-    if(payload.meta?.daysComplete!==payload.meta?.daysRequested) throw new Error("요청한 기간의 데이터가 모두 모이지 않았습니다.");
-    state.insightData=payload; state.insightKey=key; drawLiveInsights(payload);
-  } catch(error) {
-    if(error.name==="AbortError"||requestId!==state.insightRequestId)return;
-    $("chartTotal").textContent="—"; $("periodAudience").textContent="—"; $("averageRevenue").textContent="—";
-    $("revenueChart").replaceChildren(); $("topRows").replaceChildren();
-    const message=[error.message,error.warning?.message].filter(Boolean).join(" ")||"KOBIS 인사이트를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
-    setInsightStatus(message,"error");
+function drawInsightData() {
+  makeLineChart();
+  const allNormal=state.insightEntries.length===state.range&&state.insightEntries.every(entry=>entry.status==="normal");
+  drawTopMovieChart(allNormal);
+  const metricsPlaceholder=$("metricPlaceholder"); metricsPlaceholder.hidden=allNormal;
+  if(!allNormal) {
+    $("periodAudience").textContent="—";$("revenuePerAudience").textContent="—";
+    metricsPlaceholder.textContent="빈 날짜·실패·조회 중인 날짜가 있습니다. 기간 합계와 Top 5는 모든 날짜에 정상 결과가 있을 때 표시합니다.";
+    return;
   }
+  let totalRevenue=0n,totalAudience=0n;
+  for(const entry of state.insightEntries) for(const movie of entry.movies) {
+    totalRevenue+=BigInt(toInteger(movie.revenue));
+    totalAudience+=BigInt(toInteger(movie.audience));
+  }
+  $("periodAudience").textContent=audienceLabel(totalAudience);
+  $("revenuePerAudience").textContent=totalAudience>0n?`₩ ${fmt.format(Number((totalRevenue+totalAudience/2n)/totalAudience))} /명`:"—";
+  metricsPlaceholder.textContent="기간 전체 합계: 일별 Top 10에 관측된 매출·관객만 포함합니다.";
 }
-function renderInsights() {
-  if(state.mode==="live") void loadLiveInsights();
-  else {setInsightStatus("");renderDemoInsights();}
+function updateInsightStatus() {
+  const counts=entryCounts();
+  if(counts.pending||counts.loading) {
+    const current=state.insightEntries.find(entry=>entry.status==="loading");
+    setInsightStatus(current?`${current.date} 자료를 확인하고 있습니다. 날짜별 진행 상황을 표시합니다.`:`다음 날짜 조회를 준비하고 있습니다.`,"loading");return;
+  }
+  if(counts.failed) setInsightStatus(`${counts.failed}일 조회에 실패했습니다. 날짜별 상태에서 실패한 날만 다시 시도할 수 있습니다.`,"error");
+  else if(counts.empty) setInsightStatus(`${counts.empty}일은 정상적으로 조회했지만 자료가 없습니다. 차트는 해당 날짜에서 끊고 기간 합계·Top 5는 표시하지 않습니다.`,"warning");
+  else setInsightStatus("모든 날짜에서 정상 결과를 받았습니다. 기간 합계와 영화 코드별 Top 5를 표시합니다.");
 }
+async function fetchInsightDate(entry,runId,controller) {
+  entry.status="loading";entry.error="";renderInsightProgress(entry.date);updateInsightStatus();drawInsightData();
+  try {
+    const query=new URLSearchParams({date:entry.date,period:"daily"});
+    const response=await fetch(`/api/boxoffice?${query}`,{signal:controller.signal,cache:"no-store"});
+    const payload=await response.json();
+    if(runId!==state.insightRequestId)return;
+    if(!response.ok) throw new Error(payload.error?.message||"해당 날짜 조회에 실패했습니다.");
+    if(!Array.isArray(payload.data?.movies)) throw new Error("해당 날짜 응답 형식이 올바르지 않습니다.");
+    entry.movies=payload.data.movies;
+    for(const movie of entry.movies) {
+      if(typeof movie.movieCode!=="string"||!movie.movieCode||typeof movie.title!=="string") throw new Error("영화 코드 또는 영화명이 올바르지 않습니다.");
+      toInteger(movie.revenue);toInteger(movie.audience);
+    }
+    entry.revenue=entry.movies.reduce((sum,movie)=>sum+BigInt(toInteger(movie.revenue)),0n);
+    entry.status=entry.movies.length?"normal":"empty";
+  } catch(error) {
+    if(error.name==="AbortError"||runId!==state.insightRequestId)return;
+    entry.status="failed";entry.movies=[];entry.error=error.message||"조회 오류";
+  }
+  if(runId!==state.insightRequestId)return;
+  renderInsightProgress();drawInsightData();updateInsightStatus();
+}
+async function retryInsightDate(date) {
+  const entry=state.insightEntries.find(item=>item.date===date);
+  if(!entry||entry.status!=="failed")return;
+  const controller=new AbortController();state.insightRetryControllers.set(date,controller);
+  const runId=state.insightRequestId;
+  await fetchInsightDate(entry,runId,controller);
+  state.insightRetryControllers.delete(date);
+}
+async function loadInsights() {
+  const endDate=$("dateInput").value,key=`${endDate}:${state.range}`;
+  const parsedEndDate=new Date(`${endDate}T00:00:00Z`);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(endDate)||Number.isNaN(parsedEndDate.getTime())||parsedEndDate.toISOString().slice(0,10)!==endDate) {
+    if(state.insightController)state.insightController.abort();
+    for(const controller of state.insightRetryControllers.values())controller.abort();
+    state.insightRetryControllers.clear();state.insightKey=null;state.insightEntries=[];
+    $("insightDateRange").textContent="조회 날짜를 선택하세요";$("insightProgress").max=state.range;$("insightProgress").value=0;
+    $("progressLabel").textContent="조회 대기";$("progressValue").textContent=`0 / ${state.range}일`;
+    for(const id of ["countNormal","countEmpty","countFailed","countLoading"])$(id).textContent="0";
+    $("countPending").textContent=state.range;$("insightDays").replaceChildren();
+    $("periodAudience").textContent="—";$("revenuePerAudience").textContent="—";$("topMoviesChart").replaceChildren();
+    $("topMoviesPlaceholder").hidden=false;$("metricPlaceholder").hidden=false;$("metricPlaceholder").textContent="조회 날짜를 선택하면 기간 지표를 계산합니다.";
+    $("revenueChart").replaceChildren();$("chartLabels").replaceChildren();setInsightStatus("F1에서 유효한 조회 날짜를 선택한 뒤 다시 확인하세요.","error");return;
+  }
+  if(state.insightKey===key&&state.insightEntries.length){renderInsightProgress();drawInsightData();updateInsightStatus();return;}
+  if(state.insightController)state.insightController.abort();
+  for(const controller of state.insightRetryControllers.values())controller.abort();
+  state.insightRetryControllers.clear();
+  const runId=++state.insightRequestId,controller=new AbortController();state.insightController=controller;
+  state.insightKey=key;state.insightEntries=insightDates(endDate,state.range).map(date=>({date,status:"pending",movies:[],error:""}));
+  $("insightDateRange").textContent=`${state.insightEntries[0].date} — ${endDate}`;
+  renderInsightProgress();drawInsightData();
+  for(const entry of state.insightEntries) {
+    if(runId!==state.insightRequestId) return;
+    await fetchInsightDate(entry,runId,controller);
+  }
+  if(runId===state.insightRequestId) {renderInsightProgress();updateInsightStatus();}
+}
+function renderInsights() { void loadInsights(); }
 function showView(view) {
   const isInsights=view==="insights"; $("listView").hidden=isInsights; $("insightsView").hidden=!isInsights;
   $("crumb").textContent=isInsights?"인사이트":"박스오피스";
@@ -260,9 +358,9 @@ function wire() {
   $("searchInput").addEventListener("keydown",event=>{if(event.key==="Enter"){syncUrl();void runQuery();}});
   $("searchInput").addEventListener("input",()=>{$("clearSearch").hidden=!$("searchInput").value;});
   $("clearSearch").addEventListener("click",()=>{$("searchInput").value="";$("clearSearch").hidden=true;syncUrl();void runQuery();});
-  $("dateInput").addEventListener("change",()=>{state.scenario="auto";$("scenarioSelect").value="auto";syncUrl();void runQuery();if(!$("insightsView").hidden){state.insightData=null;state.insightKey=null;renderInsights();}});
+  $("dateInput").addEventListener("change",()=>{state.scenario="auto";$("scenarioSelect").value="auto";syncUrl();void runQuery();if(!$("insightsView").hidden){state.insightKey=null;renderInsights();}});
   document.querySelectorAll("[data-range]").forEach(button=>button.addEventListener("click",()=>{state.range=Number(button.dataset.range);document.querySelectorAll("[data-range]").forEach(el=>el.classList.toggle("active",el===button));renderInsights();}));
-  document.querySelectorAll("[data-top]").forEach(button=>button.addEventListener("click",()=>{state.top=Number(button.dataset.top);document.querySelectorAll("[data-top]").forEach(el=>el.classList.toggle("active",el===button));renderInsights();}));
+  $("insightDays").addEventListener("click",event=>{const button=event.target.closest("[data-retry-date]");if(button)void retryInsightDate(button.dataset.retryDate);});
   document.querySelectorAll(".banner-close").forEach(button=>button.addEventListener("click",()=>button.closest(".demo-banner").remove()));
   $("exportBtn").addEventListener("click",()=>toast("데모에서는 파일 내보내기를 지원하지 않습니다."));
   const updateLabel=document.querySelector(".update-label");

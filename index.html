@@ -54,13 +54,33 @@
       </section>
 
       <section class="page insights-view" id="insightsView" hidden>
-        <div class="page-heading"><div><p class="eyebrow">BOX OFFICE ANALYTICS</p><h1>흥행 인사이트</h1><p class="subheading">기간별 매출과 관객 흐름을 비교해 보세요.</p></div><div class="insight-date">▦ <span>2026. 10. 24 기준</span></div></div>
-        <div class="demo-banner"><span class="banner-icon">✦</span><div><b>데모 미리보기</b><p>차트와 지표는 가상 샘플을 바탕으로 표시합니다.</p></div><button class="banner-close" aria-label="안내 닫기">×</button></div>
-        <div class="insight-controls"><div><h2>매출 추이</h2><p>선택 기간의 일별 박스오피스 매출 합계</p></div><div class="segmented range-tabs" role="group" aria-label="조회 기간"><button class="seg active" data-range="7">7일</button><button class="seg" data-range="14">14일</button><button class="seg" data-range="30">30일</button></div></div>
+        <div class="page-heading"><div><p class="eyebrow">BOX OFFICE ANALYTICS</p><h1>흥행 인사이트</h1><p class="subheading">일별 Top 10 관측 데이터로 매출 흐름과 반복 진입 영화를 살펴봅니다.</p></div><div class="insight-date">▦ <span id="insightDateRange">기간 미선택</span></div></div>
+        <div class="insight-notice"><strong>일별 Top 10 관측 데이터 기준</strong><span>전체 영화시장 통계가 아닙니다. 순위 밖 영화의 매출은 0으로 추정하거나 채우지 않습니다.</span></div>
+        <div class="insight-controls"><div><h2>관측 지표</h2><p>F1 조회 날짜를 종료일로 삼아 최근 일별 자료를 날짜별로 확인합니다.</p></div><div class="segmented range-tabs" role="group" aria-label="조회 기간"><button class="seg active" data-range="7">7일</button><button class="seg" data-range="14">14일</button><button class="seg" data-range="30">30일</button></div></div>
+        <section class="insight-progress-card" aria-label="날짜별 조회 진행 상태">
+          <div class="progress-top"><strong id="progressLabel">조회 대기</strong><span id="progressValue">0 / 7일</span></div>
+          <progress id="insightProgress" max="7" value="0" aria-label="인사이트 날짜별 조회 진행률"></progress>
+          <div class="status-counts" aria-live="polite">
+            <span>정상 <b id="countNormal">0</b></span><span>빈 날짜 <b id="countEmpty">0</b></span><span>실패 <b id="countFailed">0</b></span><span>조회 중 <b id="countLoading">0</b></span><span>대기 <b id="countPending">0</b></span>
+          </div>
+          <details class="day-status-details"><summary>날짜별 상태와 재시도</summary><ul id="insightDays" class="day-status-list"></ul></details>
+        </section>
         <p class="insight-status" id="insightStatus" role="status" aria-live="polite" hidden></p>
-        <div class="insight-grid"><section class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">기간 총매출</span><h3 id="chartTotal">₩ 0</h3></div><span class="chart-change">↑ 9.4% <small>이전 기간 대비</small></span></div><div class="chart-wrap"><div class="y-labels"><span>₩ 60억</span><span>₩ 40억</span><span>₩ 20억</span><span>₩ 0</span></div><div class="chart" id="revenueChart" aria-label="일별 매출 추이 차트"></div></div><div class="chart-x-labels" id="chartLabels"></div></section>
-          <section class="metric-stack"><article class="summary-card"><div class="summary-top"><span>기간 총관객수</span><span class="summary-icon blue">♙</span></div><strong id="periodAudience">0명</strong><small>선택 기간 합계</small></article><article class="summary-card"><div class="summary-top"><span>일평균 매출</span><span class="summary-icon purple">₩</span></div><strong id="averageRevenue">₩ 0</strong><small>선택 기간 일평균</small></article></section></div>
-        <section class="table-card top-films"><div class="table-head"><div><h3>기간별 흥행 영화</h3><p>선택한 기간의 누적 매출 기준</p></div><div class="segmented top-tabs" role="group" aria-label="Top 영화 개수"><button class="seg active" data-top="5">Top 5</button><button class="seg" data-top="10">Top 10</button></div></div><div class="table-scroll"><table><thead><tr><th>순위</th><th>영화명</th><th>매출액</th><th>관객수</th><th>점유율</th></tr></thead><tbody id="topRows"></tbody></table></div></section>
+        <div class="insight-grid">
+          <section class="chart-card insight-chart-card"><div class="chart-heading"><div><span class="chart-kicker">차트 1 · 일별 추이</span><h3>일별 Top 10 관측 매출 합계 추이</h3></div></div><p class="chart-rationale">날짜마다 Top 10에 실제 든 영화의 매출 합계만 그려, 관측된 흥행 변화를 보여줍니다.</p><svg id="revenueChart" class="line-chart" viewBox="0 0 760 250" role="img" aria-label="일별 Top 10 관측 매출 합계 추이"></svg><div class="chart-x-labels" id="chartLabels"></div></section>
+          <section class="chart-card insight-chart-card"><div class="chart-heading"><div><span class="chart-kicker">차트 2 · 기간 합계 Top 5</span><h3>영화별 매출 합계 Top 5</h3></div></div><p class="chart-rationale">영화 코드별로 실제 Top 10에 관측된 날짜의 매출만 합산해, 기간 중 반복 흥행작을 비교합니다.</p><div id="topMoviesChart" class="top-movie-bars" role="img" aria-label="기간 내 영화별 매출 합계 Top 5"></div><p id="topMoviesPlaceholder" class="chart-placeholder">모든 날짜가 정상 조회되면 표시합니다.</p></section>
+        </div>
+        <section class="insight-metrics" aria-label="보조 수치"><article class="summary-card"><div class="summary-top"><span>관측 관객 합계</span><span class="summary-icon blue">♙</span></div><strong id="periodAudience">—</strong><small>Top 10 관측 범위의 입장 규모를 요약합니다.</small></article><article class="summary-card"><div class="summary-top"><span>관객당 매출</span><span class="summary-icon purple">₩</span></div><strong id="revenuePerAudience">—</strong><small>관측된 관객 한 명당 매출 수준을 비교합니다.</small></article></section>
+        <p class="metric-placeholder" id="metricPlaceholder">기간 합계와 Top 5는 모든 날짜에 정상 결과가 있을 때만 계산합니다.</p>
+        <details class="insight-method"><summary>지표에 포함·제외하는 데이터</summary><div class="table-scroll"><table><thead><tr><th>항목</th><th>포함 · 제외 규칙</th></tr></thead><tbody>
+          <tr><th>기간 유형</th><td>일별 응답만 사용합니다. 주간·주말 응답은 섞지 않습니다.</td></tr>
+          <tr><th>영화 묶기</th><td>영화명 대신 영화 코드(<code>movieCd</code>)로 같은 영화를 묶습니다.</td></tr>
+          <tr><th>수치 합산</th><td>일별 매출(<code>salesAmt</code>)과 관객(<code>audiCnt</code>)만 합산합니다. 누적 매출(<code>salesAcc</code>)·누적 관객(<code>audiAcc</code>)은 날짜별로 더하지 않습니다.</td></tr>
+          <tr><th>Top 10 밖</th><td>해당 날짜 응답에 없는 영화는 0으로 채우지 않습니다. 실제 관측된 날짜의 실적만 더합니다.</td></tr>
+          <tr><th>빈 날짜 · 실패</th><td>차트 선을 끊어 표시하고 날짜 사이를 연결하지 않습니다. 모든 날짜가 정상 결과일 때만 기간 합계·Top 5를 표시합니다.</td></tr>
+          <tr><th>관객당 매출</th><td>관측 관객 합계가 0 이하이면 값을 계산하지 않고 “—”로 표시합니다.</td></tr>
+          <tr><th>단위</th><td>정수 원본으로 합계를 먼저 계산한 뒤 화면 표시 단계에서 매출은 억원, 관객은 천명으로 변환합니다.</td></tr>
+        </tbody></table></div></details>
       </section>
       <footer class="app-footer"><span>BOXOFFICE INSIGHTS</span><span>KOBIS 공개 데이터 기반 서비스 · 데모는 가상 데이터</span></footer>
     </main>
