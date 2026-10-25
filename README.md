@@ -1,53 +1,85 @@
-# 영화 박스오피스 인사이트 대시보드
+# 영화 박스오피스 인사이트
 
-영화진흥위원회 KOBIS 박스오피스 화면입니다. `server.py`는 `DATA_MODE=demo`에서 가상 fixture를, `DATA_MODE=live`에서 서버 전용 KOBIS API를 제공합니다. Supabase 캐시 설정이 되어 있으면 live 조회는 저장본을 먼저 사용합니다.
+KOBIS 박스오피스 정보를 날짜·기간별로 조회하고, 최근 일별 Top 10 관측 데이터를 바탕으로 흥행 추이를 살펴보는 웹 앱입니다. 화면은 정적 HTML/CSS/JavaScript이며, `server.py`가 파일과 내부 API를 함께 제공합니다.
 
-## 실행
+## 필요한 환경
 
-Windows CMD에서 demo 모드를 실행합니다.
+- Python **3.10 이상** (권장: Python 3.12 계열)
+- 인터넷 브라우저
+- Node.js/npm은 일반 실행에는 필요하지 않습니다. `npm run verify:data`를 사용할 때만 필요합니다.
+- 앱 실행에 별도 Python 패키지를 설치하지 않습니다. 외부 API/DB 연결은 live 설정을 마친 경우에만 사용합니다.
+
+버전을 확인합니다.
 
 ```cmd
-cd /d C:\Users\USER\Desktop\boxoffice-insights
+python --version
+```
+
+Node.js/npm은 앱 실행에 필요하지 않습니다. 설치되어 있고 `verify:data` 명령을 사용할 예정이라면 버전을 확인합니다.
+
+```cmd
+node --version
+npm --version
+```
+
+## 키 없이 먼저 실행하기 (demo)
+
+Windows CMD에서 저장소 폴더로 이동한 뒤 실행합니다.
+
+```cmd
+cd /d "C:\Users\USER\Desktop\boxoffice-insights"
 set DATA_MODE=demo
+set HOST=127.0.0.1
 set PORT=8000
 python server.py
 ```
 
-그 다음 브라우저에서 `http://127.0.0.1:8000/`을 엽니다. 서버는 `Ctrl+C`로 종료합니다. Python 표준 라이브러리만 사용하며 API 키, DB, 패키지 설치는 필요하지 않습니다. `DATA_MODE`가 `demo`가 아니면 API는 `503 DATA_MODE_DISABLED`를 반환합니다.
+브라우저에서 <http://127.0.0.1:8000/>을 엽니다. 샘플 영화와 수치는 가상 데이터입니다. 서버는 `Ctrl+C`로 종료합니다.
 
-실제 KOBIS 연동은 `.env.local`에 `DATA_MODE=live`와 `KOBIS_API_KEY`를 설정하고 실행합니다. 서버가 시작할 때 두 설정을 읽으며, 키 값은 화면·로그·문서에 복사하지 마세요.
+데모 상태를 확인할 수 있는 주소:
+
+| 확인 항목 | URL 뒤에 붙일 쿼리 | 예상 상태 |
+|---|---|---|
+| 목록 성공 | `?date=2026-09-05` | 샘플 박스오피스 목록 |
+| 정상 빈 결과 | `?date=2026-09-06` | 오류가 아닌 빈 기간 안내 |
+| 검색 결과 있음 | `?date=2026-09-05&q=바다` | 일치 영화 |
+| 검색 결과 없음 | `?date=2026-09-05&q=없는영화` | 검색 전 목록은 있으나 검색 결과 없음 |
+| 오류 예시 | `?date=2026-09-05&state=error` | 재시도 가능한 데모 오류 |
+
+## 실제 데이터(live) 연결
+
+실제 API와 저장 캐시를 쓰려면 KOBIS와 Supabase 프로젝트 및 서버 비밀 환경변수가 필요합니다. `DATA_MODE=live`는 브라우저에서 직접 KOBIS/Supabase를 호출하지 않고 서버 내부 API를 사용합니다.
+
+1. `.env.example`을 `.env.local`로 복사합니다.
+
+   ```cmd
+   copy .env.example .env.local
+   ```
+
+2. `.env.local`에서 아래 **환경변수 이름**을 본인의 설정으로 채웁니다.
+   - `DATA_MODE`
+   - `KOBIS_API_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_SECRET_KEY`
+3. Supabase 프로젝트에서 `supabase/migrations/202610250001_box_office_cache.sql`을 실행합니다.
+4. CMD에서 `set DATA_MODE=live` 후 `python server.py`를 실행합니다. `.env.local`에 이미 설정한 변수는 프로세스 환경변수로 덮어쓰지 않습니다.
+
+키는 `.env.local`과 배포 서비스의 서버 환경변수 저장소에만 둡니다. `.env.local`은 Git에서 제외됩니다. 비밀값을 브라우저 코드, `README.md`/문서, URL, 스크린샷, 로그, 공개 저장소에 붙여 넣지 마세요. 배포 절차는 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)를 참고하세요.
+
+## 인사이트 범위
+
+인사이트는 전체 영화시장 통계가 아니라 **일별 Top 10 관측 데이터**를 요약합니다. 주간·주말 결과를 섞지 않고 영화 코드로 묶으며, 누적 수치를 날짜별로 더하지 않습니다. 순위 밖 영화의 값을 0으로 추정하지 않습니다. 빈 날짜와 실패 날짜는 차트에서 분리되고, 기간 합계와 영화 Top 5는 모든 날짜가 정상일 때만 표시됩니다.
+
+## 명령
 
 ```cmd
-set DATA_MODE=live
-set PORT=8000
 python server.py
 ```
 
-live 모드는 F1 목록과 F2 인사이트가 모두 KOBIS 데이터를 사용합니다. Supabase가 연결되면 같은 날짜·기간의 유효 저장본을 먼저 사용하고, 없거나 만료된 경우에만 KOBIS를 조회합니다. F2는 7·14·30일 범위를 날짜별로 순차 요청하고 진행률·날짜별 상태를 표시합니다. 차트는 일별 Top 10 관측 매출 추이와 영화 코드별 기간 매출 Top 5이며, 관측 관객 합계와 관객당 매출을 보조 수치로 제공합니다. 빈 날짜와 실패 날짜는 추이 선을 끊고, 모든 날짜에 정상 결과가 있을 때만 기간 합계와 Top 5를 계산합니다. demo도 같은 날짜별 상태 처리를 사용하며 DB를 호출하지 않습니다.
+`package.json`에 등록된 명령은 `verify:data` 하나입니다. 로컬 `.env.local`에 live KOBIS·Supabase 설정과 해당 기간의 검증 자료가 준비되어 있을 때만 실행합니다.
 
-`.env.local`은 서버가 시작할 때 읽으며, 키와 모드를 바꾸면 서버를 재시작해야 합니다. 실제 응답은 내부 API를 통해서만 브라우저에 전달됩니다. `.env.local`은 Git에서 제외됩니다. 연동 표와 오류/검증 규칙은 [docs/API_GUIDE.md](docs/API_GUIDE.md)를 참고하세요.
+```cmd
+npm run verify:data -- --date=YYYY-MM-DD --period=daily
+```
 
-## F1 상태 확인
-
-기본 날짜는 `2026-09-05`이며 샘플 결과가 표시됩니다. 주소 뒤에 아래 쿼리를 붙여 각각 확인할 수 있습니다.
-
-| 상태 | URL 뒤 쿼리 | 기대 결과 |
-|---|---|---|
-| 성공 | `?date=2026-09-05` | 샘플 영화 목록, 조회 건수·출처·응답 생성 시각 |
-| 정상 빈 결과 | `?date=2026-09-06` | 결과 0건, 기간 데이터가 없는 정상 응답이며 오류가 아니라는 안내 |
-| 검색 결과 있음 | `?date=2026-09-05&q=바다` | `바다의 노래` 등 제목에 “바다”가 포함된 영화 |
-| 검색 결과 없음 | `?date=2026-09-05&q=없는영화` | 전체 데이터는 조회됐지만 검색 일치가 없다는 별도 안내 |
-| 로딩 | `?date=2026-09-05&state=loading` | 로딩 표시를 유지. “조회 조건으로 확인”으로 바꾸면 조회를 시작 |
-| 오류 | `?date=2026-09-05&state=error` | API 502 데모 오류와 재시도 안내 |
-
-상태 메뉴에서 자동 조회, 로딩, 정상 빈 결과, 오류 미리보기를 바꿀 수도 있습니다. 정상 빈 결과는 조회 날짜를 `2026-09-06`으로 선택하는 방법으로도 확인합니다. demo의 `source`는 샘플 fixture 출처를 설명하며, 표기 시각은 데모 응답 생성 시각입니다. 현재 포트 8000에서 보안 API 서버가 live 모드로 실행 중입니다.
-
-## 범위
-
-- 날짜·일간/주간/주말 선택과 영화명 부분 검색
-- 순위·영화명·개봉일·매출·관객수·누적 관객수 목록
-- 조회 건수·샘플 출처·응답 생성 시각
-- 정상 빈 결과·검색 결과 없음·로딩·오류 구분
-- 인사이트는 전체 시장 통계가 아닌 일별 Top 10 관측값입니다. 순위 밖 영화의 매출을 0으로 채우지 않습니다.
-
-`DATA_MODE=live`의 Supabase migration 적용, 서버 비밀값 설정, 캐시 동작 확인 순서는 [docs/API_GUIDE.md](docs/API_GUIDE.md)를 참고하세요. 설정 완료 전에는 DB 연결 없이 KOBIS live 응답으로 fallback합니다. API 키와 Supabase secret을 브라우저 코드에 입력하지 마세요. 배포 전 Vercel Hobby 조건을 확인하세요.
+검증 명령은 Supabase 저장본과 새 KOBIS 조회를 비교합니다. API/DB 비밀값이 없는 demo 실행에는 필요하지 않습니다.
