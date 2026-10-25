@@ -1,6 +1,6 @@
 # 영화 박스오피스 인사이트 대시보드
 
-영화진흥위원회 KOBIS 박스오피스 화면입니다. `server.py`는 `DATA_MODE=demo`에서 가상 fixture를 제공하고, `DATA_MODE=live`에서 서버에만 설정된 KOBIS 키로 실제 일간·주간·주말 데이터를 조회합니다. 현재 이 단계에서는 DB 저장과 캐시를 사용하지 않습니다.
+영화진흥위원회 KOBIS 박스오피스 화면입니다. `server.py`는 `DATA_MODE=demo`에서 가상 fixture를, `DATA_MODE=live`에서 서버 전용 KOBIS API를 제공합니다. Supabase 캐시 설정이 되어 있으면 live 조회는 저장본을 먼저 사용합니다.
 
 ## 실행
 
@@ -23,7 +23,7 @@ set PORT=8000
 python server.py
 ```
 
-live 모드는 F1 목록과 F2 인사이트가 모두 KOBIS 응답을 사용합니다. F2는 종료 날짜를 포함한 7·14·30일의 일별 Top 10 자료를 서버 메모리에서 집계합니다. 기간 선택마다 날짜 수만큼 KOBIS 요청이 발생하고 DB 저장/서버 캐시는 아직 없습니다. demo 모드는 이전 가상 fixture를 유지합니다.
+live 모드는 F1 목록과 F2 인사이트가 모두 KOBIS 데이터를 사용합니다. Supabase가 연결되면 같은 날짜·기간의 유효 저장본을 먼저 사용하고, 없거나 만료된 경우에만 KOBIS를 조회합니다. F2는 7·14·30일의 일별 Top 10 자료를 서버에서 집계합니다. demo 모드는 이전 가상 fixture를 유지하며 DB를 호출하지 않습니다.
 
 `.env.local`은 서버가 시작할 때 읽으며, 키와 모드를 바꾸면 서버를 재시작해야 합니다. 실제 응답은 내부 API를 통해서만 브라우저에 전달됩니다. `.env.local`은 Git에서 제외됩니다. 연동 표와 오류/검증 규칙은 [docs/API_GUIDE.md](docs/API_GUIDE.md)를 참고하세요.
 
@@ -50,4 +50,4 @@ live 모드는 F1 목록과 F2 인사이트가 모두 KOBIS 응답을 사용합�
 - 정상 빈 결과·검색 결과 없음·로딩·오류 구분
 - demo 인사이트는 가상 시계열, live 인사이트는 일별 KOBIS Top 10 집계입니다.
 
-`DATA_MODE=live`는 F1/F2에서 실제 KOBIS 응답을 사용합니다. 반복 조회 부하를 줄이는 DB 저장·캐시는 아직 구현하지 않았습니다. API 키를 브라우저 코드에 입력하지 마세요. 배포 전 Vercel Hobby 조건을 확인하고, Supabase는 DB를 채택하는 경우에만 최신 조건을 확인해야 합니다.
+`DATA_MODE=live`의 Supabase migration 적용, 서버 비밀값 설정, 캐시 동작 확인 순서는 [docs/API_GUIDE.md](docs/API_GUIDE.md)를 참고하세요. 설정 완료 전에는 DB 연결 없이 KOBIS live 응답으로 fallback합니다. API 키와 Supabase secret을 브라우저 코드에 입력하지 마세요. 배포 전 Vercel Hobby 조건을 확인하세요.

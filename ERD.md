@@ -159,3 +159,4 @@ ORDER BY p.base_date, r.rank;
 - 같은 트랜잭션에서 해당 `period_id`의 이전 실적을 교체하고 새 `box_office_results`를 저장한다. 빈 결과여도 기간 행은 남기고 실적 행은 0개로 둔다.
 - KOBIS 호출 실패나 응답 검증 실패는 정상 빈 조회로 저장하지 않는다.
 - API 키는 어느 테이블에도 저장하지 않는다. `source`와 `collected_at`은 샘플/실제 출처와 최신성 표시를 위한 메타데이터다.
+- 테이블·컬럼은 이 ERD에서 추가하지 않는다. `verify:data`가 저장 당시 원문을 비교할 수 있도록 raw KOBIS JSON은 Git 제외 및 HTTP 정적 제공 차단된 로컬 `.boxoffice-source/`에 보관한다. 이 보관 파일은 DB 트랜잭션에 포함되지 않으며, 임시 파일 시스템 배포 환경에서는 영구 보존되지 않을 수 있다.

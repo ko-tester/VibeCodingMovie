@@ -13,10 +13,13 @@
 - [x] 요청 파라미터·필드 매핑·오류·검증 규칙을 `docs/API_GUIDE.md`에 정리
 - [x] F2 live 7·14·30일 일간 실적 집계, Top 5/10, 총매출·총관객·일평균 API 연결
 - [x] F2 전체 기간 성공만 표시하도록 구현; 일부 날짜 실패 시 부분 집계 차단
+- [x] ERD와 동일한 Supabase migration 및 원자적 `save_box_office_period` / 읽기 전용 `read_box_office_period` RPC 작성
+- [x] 24시간 정상 결과·1시간 정상 빈 결과 캐시, 오래된 쓰기 차단, 저장소 장애 경고/fallback 구현
+- [x] `npm run verify:data` 읽기 전용 검증 명령과 private 원문 응답 보관 구현
 
 ## 다음 단계
 
 - [ ] KOBIS 주간·주말의 다양한 날짜 및 주차 경계 동작 확인
-- [ ] 캐시/DB 채택 여부 결정 후 TTL, 저장, 저장본 대조 구현
+- [ ] Supabase 프로젝트에 migration 적용하고 `.env.local`의 서버 전용 설정 완료 후 저장/캐시/검증 실연동
 - [ ] 반복 F2 조회 부하를 줄이는 영속 스냅샷/캐시 및 누락 날짜 보완
 - [ ] 무료 배포 조건 확인 후 배포 결정

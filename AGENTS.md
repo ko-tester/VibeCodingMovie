@@ -73,6 +73,12 @@ Node.js 22.x 기준이며 `.node-version`은 22.23.4다. 설치는 `npm ci`를 �
 - 기술 스택 선택이나 기존 선택을 바꾸면 `ADR.md`에 맥락·대안·결정·근거·결과를 기록한다.
 - 테이블, 키, 관계, 제약을 바꾸면 `ERD.md`를 갱신하고 관련 문서와 일치하는지 확인한다.
 
+## Box Office API 작업 메모
+
+- 이 작업 트리의 실행 진입점은 `server.py`이며 KOBIS/Supabase 자격 증명은 `.env.local`에서 서버만 읽는다. 값을 화면·로그·문서·커밋에 출력하지 않는다.
+- Supabase migration은 `supabase/migrations/`에 둔다. 사용자가 Supabase 프로젝트 준비, migration 적용, `.env.local` 설정을 마쳤다고 알리기 전에는 DB 연결이나 `verify:data`를 실행하지 않는다.
+- 저장본 검증 명령은 `npm run verify:data -- --date=YYYY-MM-DD --period=daily`이며 Python 스크립트를 실행한다. 이 명령은 DB 읽기 RPC와 KOBIS fresh 조회만 사용한다.
+
 
 <!-- BEGIN:nextjs-agent-rules -->
 

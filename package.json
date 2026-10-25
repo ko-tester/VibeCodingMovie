@@ -1,0 +1,8 @@
+{
+  "name": "boxoffice-insights",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "verify:data": "python scripts/verify_data.py"
+  }
+}

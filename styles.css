@@ -11,3 +11,5 @@
 @media(max-width:700px){.dataset-meta{gap:8px 14px;align-items:flex-start;flex-wrap:wrap;padding:10px 13px}.dataset-meta>div{display:block;flex:1 1 28%}.dataset-meta strong{display:block;margin-top:3px;font-size:8px}}
 
 .insight-status{margin:12px 0;padding:12px 16px;border:1px solid #e4e0ff;border-radius:10px;background:#f4f2ff;color:#5448b8;line-height:1.5}.insight-status[data-kind='error']{border-color:#f4d2d0;background:#fff4f3;color:#a93e35}.insight-status[data-kind='loading']{color:#5f6472}
+
+.cache-warning{margin:0;padding:10px 17px;background:#fff8e8;color:#825c0b;border-bottom:1px solid #f2e5c6;font-size:11px;line-height:1.5}.insight-status[data-kind='warning']{border-color:#f2e5c6;background:#fff8e8;color:#825c0b}

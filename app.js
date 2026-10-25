@@ -65,10 +65,11 @@ function renderTable(items) {
   $("footerCount").textContent = `전체 ${items.length}편`;
   $("resultCaption").textContent = `${dateLabel($("dateInput").value)} 기준 · ${({daily:"일간",weekly:"주간",weekend:"주말"})[state.period]}`;
 }
-function updateDatasetMeta({count="—",source=null,collectedAt="—"}={}) {
+function updateDatasetMeta({count="—",source=null,collectedAt="—",warning=null}={}) {
   $("datasetCount").textContent = typeof count === "number" ? `${count}건` : count;
   $("datasetSource").textContent = source || (state.mode==="live"?"KOBIS Open API":"KOBIS 샘플 데이터");
   $("datasetCollected").textContent = collectedAt === "—" ? collectedAt : new Date(collectedAt).toLocaleString("ko-KR",{dateStyle:"short",timeStyle:"short"});
+  const warningElement=$("cacheWarning"); warningElement.hidden=!warning?.message; warningElement.textContent=warning?.message||"";
 }
 function emptyPanel(kind, query="", message="") {
   const region = $("resultsRegion");
@@ -120,11 +121,11 @@ async function runQuery() {
     const response=await fetch(`/api/boxoffice?${queryParams.toString()}`,{signal:state.controller.signal,cache:"no-store"});
     const payload=await response.json();
     if(requestId!==state.requestId) return;
-    if(!response.ok) { const error=new Error(payload.error?.message||"조회에 실패했습니다."); error.code=payload.error?.code; throw error; }
+    if(!response.ok) { const error=new Error(payload.error?.message||"조회에 실패했습니다."); error.code=payload.error?.code; error.warning=payload.meta?.warning; throw error; }
     if(!Array.isArray(payload.data?.movies)||typeof payload.meta?.total!="number") throw new Error("서버 응답 형식이 올바르지 않습니다.");
     if(payload.meta?.mode) state.mode=payload.meta.mode;
     const movies=payload.data.movies;
-    updateDatasetMeta({count:payload.meta.total,source:payload.meta.source,collectedAt:payload.meta.collectedAt});
+    updateDatasetMeta({count:payload.meta.total,source:payload.meta.source,collectedAt:payload.meta.collectedAt,warning:payload.meta.warning});
     if(payload.meta.totalBeforeSearch===0) {
       summary([]); $("resultCount").textContent="0개 영화"; $("footerCount").textContent="전체 0편"; emptyPanel("empty"); return;
     }
@@ -134,7 +135,7 @@ async function runQuery() {
     summary(movies); renderTable(movies);
   } catch(error) {
     if(error.name==="AbortError"||requestId!==state.requestId) return;
-    updateDatasetMeta({count:"—",collectedAt:"—"});
+    updateDatasetMeta({count:"—",collectedAt:"—",warning:error.warning});
     summary([]); $("resultCount").textContent="조회 실패"; $("footerCount").textContent="결과를 표시할 수 없음";
     emptyPanel("error","",error.message);
   }
@@ -212,7 +213,8 @@ function drawLiveInsights(payload) {
     const track=document.createElement("div"); track.className="share-track"; const fill=document.createElement("div"); fill.className="share-fill"; fill.style.width=`${Math.max(0,Math.min(100,Number(movie.share)*100))}%`;
     track.append(fill); shareWrap.append(shareText,track); shareCell.append(shareWrap); tr.append(rank,movieCell,revenue,audience,shareCell); tbody.append(tr);
   });
-  setInsightStatus(totalRevenue===0?"선택한 기간에 집계할 KOBIS Top 10 박스오피스 기록이 없습니다.":"");
+  if(payload.meta?.warning?.message) setInsightStatus(payload.meta.warning.message,"warning");
+  else setInsightStatus(totalRevenue===0?"선택한 기간에 집계할 KOBIS Top 10 박스오피스 기록이 없습니다.":"");
 }
 async function loadLiveInsights() {
   const endDate=$("dateInput").value;
@@ -230,14 +232,15 @@ async function loadLiveInsights() {
     const response=await fetch(`/api/insights?${params.toString()}`,{signal:state.insightController.signal,cache:"no-store"});
     const payload=await response.json();
     if(requestId!==state.insightRequestId)return;
-    if(!response.ok) throw new Error(payload.error?.message||"인사이트 조회에 실패했습니다.");
+    if(!response.ok) {const error=new Error(payload.error?.message||"인사이트 조회에 실패했습니다.");error.warning=payload.meta?.warning;throw error;}
     if(payload.meta?.daysComplete!==payload.meta?.daysRequested) throw new Error("요청한 기간의 데이터가 모두 모이지 않았습니다.");
     state.insightData=payload; state.insightKey=key; drawLiveInsights(payload);
   } catch(error) {
     if(error.name==="AbortError"||requestId!==state.insightRequestId)return;
     $("chartTotal").textContent="—"; $("periodAudience").textContent="—"; $("averageRevenue").textContent="—";
     $("revenueChart").replaceChildren(); $("topRows").replaceChildren();
-    setInsightStatus(error.message||"KOBIS 인사이트를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.","error");
+    const message=[error.message,error.warning?.message].filter(Boolean).join(" ")||"KOBIS 인사이트를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    setInsightStatus(message,"error");
   }
 }
 function renderInsights() {

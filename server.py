@@ -5,13 +5,21 @@ import os
 import re
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
+from supabase_store import (
+    SupabaseStoreError,
+    configured as supabase_configured,
+    prune_original_responses,
+    read_box_office_period,
+    save_box_office_period,
+    save_original_response,
+)
 
 ROOT = Path(__file__).resolve().parent
 HOST = "127.0.0.1"
@@ -23,6 +31,8 @@ MAX_RESPONSE_BYTES = 2_000_000
 BIGINT_MAX = 9_223_372_036_854_775_807
 JS_SAFE_INTEGER_MAX = 9_007_199_254_740_991
 INSIGHTS_WORKERS = 4
+SUCCESS_CACHE_TTL = timedelta(hours=24)
+EMPTY_CACHE_TTL = timedelta(hours=1)
 PERIODS = {"daily", "weekly", "weekend"}
 
 
@@ -38,7 +48,7 @@ def load_local_env() -> None:
                 continue
             name, value = line.split("=", 1)
             name = name.strip()
-            if name not in {"DATA_MODE", "KOBIS_API_KEY", "PORT"} or name in os.environ:
+            if name not in {"DATA_MODE", "KOBIS_API_KEY", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "PORT"} or name in os.environ:
                 continue
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -70,12 +80,13 @@ EMPTY_DATE = "2026-09-06"
 
 
 class ApiFailure(Exception):
-    def __init__(self, status: int, code: str, message: str, retryable: bool = False):
+    def __init__(self, status: int, code: str, message: str, retryable: bool = False, warning: dict | None = None):
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.warning = warning
 
 
 def now_seoul() -> str:
@@ -135,14 +146,13 @@ def normalize_movie(raw: object) -> dict:
     }
 
 
-def fetch_live_movies(period: str, target_date: str) -> list[dict]:
+def fetch_live_response(period: str, target_date: str) -> tuple[dict, list[dict]]:
     if not KOBIS_API_KEY:
         raise ApiFailure(503, "KOBIS_API_KEY_MISSING", "서버에 KOBIS API 키가 설정되지 않았습니다.")
 
     target_dt = target_date.replace("-", "")
     if period == "daily":
         endpoint = KOBIS_DAILY_URL
-        list_field = "dailyBoxOfficeList"
         params = {"key": KOBIS_API_KEY, "targetDt": target_dt, "itemPerPage": "10"}
     else:
         endpoint = KOBIS_WEEKLY_URL
@@ -183,6 +193,11 @@ def fetch_live_movies(period: str, target_date: str) -> list[dict]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ApiFailure(502, "KOBIS_INVALID_JSON", "KOBIS 응답을 JSON으로 해석할 수 없습니다.") from exc
 
+    return payload, normalize_kobis_response(period, payload)
+
+
+def normalize_kobis_response(period: str, payload: object) -> list[dict]:
+    list_field = "dailyBoxOfficeList" if period == "daily" else "weeklyBoxOfficeList"
     if not isinstance(payload, dict):
         raise ApiFailure(502, "KOBIS_INVALID_RESPONSE", "KOBIS 응답 구조가 올바르지 않습니다.")
     if "faultInfo" in payload:
@@ -197,22 +212,186 @@ def fetch_live_movies(period: str, target_date: str) -> list[dict]:
     return [normalize_movie(movie) for movie in raw_movies]
 
 
+def fetch_live_movies(period: str, target_date: str) -> list[dict]:
+    return fetch_live_response(period, target_date)[1]
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def timestamp_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
+def parse_timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE") from None
+    if parsed.tzinfo is None:
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+    return parsed
+
+
+def normalize_stored_snapshot(snapshot: object, period_type: str | None = None, base_date: str | None = None) -> tuple[list[dict], str, str]:
+    if not isinstance(snapshot, dict):
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+    if period_type is not None and snapshot.get("periodType") != period_type:
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+    if base_date is not None and snapshot.get("baseDate") != base_date:
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+    movies = snapshot.get("movies")
+    collected_at = snapshot.get("collectedAt")
+    expires_at = snapshot.get("expiresAt")
+    if not isinstance(movies, list) or len(movies) > 10:
+        raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+    parse_timestamp(collected_at)
+    parse_timestamp(expires_at)
+    normalized = []
+    for item in movies:
+        if not isinstance(item, dict):
+            raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+        movie_code = item.get("movieCode")
+        title = item.get("title")
+        release_date = item.get("releaseDate")
+        if not isinstance(movie_code, str) or not movie_code or not isinstance(title, str) or not title:
+            raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+        if release_date is not None:
+            try:
+                parse_iso_date(release_date)
+            except (TypeError, ValueError):
+                raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE") from None
+        values = (item.get("rank"), item.get("revenue"), item.get("totalRevenue"), item.get("audience"), item.get("totalAudience"))
+        if any(type(value) is not int or value < 0 for value in values):
+            raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+        if not 1 <= item["rank"] <= 10:
+            raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+        normalized.append({
+            "movieCode": movie_code,
+            "rank": item["rank"],
+            "title": title,
+            "releaseDate": release_date,
+            "revenue": item["revenue"],
+            "totalRevenue": item["totalRevenue"],
+            "audience": item["audience"],
+            "totalAudience": item["totalAudience"],
+            "genre": "",
+            "tag": title[:1],
+        })
+    return normalized, collected_at, expires_at
+
+
+def append_warning(current: dict | None, code: str, message: str) -> dict:
+    if not current:
+        return {"code": code, "message": message}
+    if current["code"] == code:
+        return current
+    return {
+        "code": "MULTIPLE_STORAGE_WARNINGS",
+        "message": f"{current['message']} {message}",
+    }
+
+
+def get_live_box_office(period: str, target_date: str) -> tuple[list[dict], dict]:
+    warning = None
+    stored = None
+    configured = supabase_configured()
+    if not configured:
+        warning = append_warning(None, "SUPABASE_NOT_CONFIGURED", "Supabase 설정이 없어 저장 캐시 없이 KOBIS에서 조회했습니다.")
+    else:
+        try:
+            stored = read_box_office_period(period, target_date)
+            if isinstance(stored, list) and len(stored) == 1:
+                stored = stored[0]
+            if stored is not None:
+                cached_movies, cached_collected_at, cached_expires_at = normalize_stored_snapshot(stored, period, target_date)
+                if parse_timestamp(cached_expires_at) > utc_now():
+                    return cached_movies, {
+                        "source": "저장된 데이터 (Supabase)",
+                        "collectedAt": cached_collected_at,
+                        "cache": {"status": "hit", "expiresAt": cached_expires_at, "persisted": True},
+                    }
+        except SupabaseStoreError:
+            warning = append_warning(None, "CACHE_READ_FAILED", "저장 결과를 읽지 못해 KOBIS에서 새로 조회했습니다.")
+
+    request_started = utc_now()
+    collected_at = timestamp_iso(request_started)
+    try:
+        original_payload, movies = fetch_live_response(period, target_date)
+    except ApiFailure as failure:
+        if stored is not None:
+            warning = append_warning(warning, "EXPIRED_CACHE_NOT_USED", "저장 데이터가 만료되어 KOBIS 조회가 필요했지만 만료 데이터는 사용하지 않았습니다.")
+        failure.warning = warning
+        raise
+
+    ttl = EMPTY_CACHE_TTL if not movies else SUCCESS_CACHE_TTL
+    expires_at = timestamp_iso(request_started + ttl)
+    meta = {
+        "source": "KOBIS Open API",
+        "collectedAt": collected_at,
+        "cache": {"status": "unconfigured", "expiresAt": expires_at, "persisted": False},
+    }
+
+    if not configured:
+        meta["warning"] = warning
+        return movies, meta
+
+    if not save_original_response(period, target_date, collected_at, original_payload):
+        warning = append_warning(warning, "SOURCE_SNAPSHOT_FAILED", "검증용 원본 응답을 보관하지 못했습니다.")
+
+    try:
+        saved = save_box_office_period(period, target_date, "KOBIS", collected_at, expires_at, movies)
+        if not isinstance(saved, dict) or type(saved.get("saved")) is not bool:
+            raise SupabaseStoreError("SUPABASE_INVALID_RESPONSE")
+        if not saved["saved"]:
+            try:
+                latest = read_box_office_period(period, target_date)
+                latest_movies, latest_collected_at, latest_expires_at = normalize_stored_snapshot(latest, period, target_date)
+            except SupabaseStoreError:
+                raise ApiFailure(503, "STALE_RESPONSE_DISCARDED", "오래된 조회 결과는 저장하거나 최신 응답 대신 제공하지 않았습니다.", True) from None
+            prune_original_responses(period, target_date, latest_collected_at)
+            if parse_timestamp(latest_expires_at) > utc_now():
+                return latest_movies, {
+                    "source": "저장된 데이터 (Supabase)",
+                    "collectedAt": latest_collected_at,
+                    "cache": {"status": "stale_request_discarded", "expiresAt": latest_expires_at, "persisted": True},
+                    "warning": {
+                        "code": "STALE_REQUEST_DISCARDED",
+                        "message": "더 늦게 수집된 저장 데이터가 있어 오래된 응답 대신 최신 저장본을 사용했습니다.",
+                    },
+                }
+            raise ApiFailure(503, "STALE_REQUEST_DISCARDED", "오래된 조회 결과는 저장하거나 최신 응답 대신 제공하지 않았습니다.", True)
+        prune_original_responses(period, target_date, collected_at)
+        meta["cache"] = {"status": "miss_saved", "expiresAt": expires_at, "persisted": True}
+    except SupabaseStoreError:
+        warning = append_warning(warning, "CACHE_WRITE_FAILED", "KOBIS 조회는 성공했지만 저장하지 못했습니다. 결과는 이번 응답에만 사용합니다.")
+        meta["cache"] = {"status": "miss_write_failed", "expiresAt": expires_at, "persisted": False}
+
+    if warning:
+        meta["warning"] = warning
+    return movies, meta
+
+
 def fetch_live_insights(end_date: date, days: int, limit: int) -> dict:
     """Aggregate complete daily KOBIS responses in memory; do not persist or cache them."""
     start_date = end_date - timedelta(days=days - 1)
     requested_dates = [start_date + timedelta(days=offset) for offset in range(days)]
     daily_movies: dict[str, list[dict]] = {}
+    daily_meta: dict[str, dict] = {}
     failures: list[ApiFailure] = []
 
     with ThreadPoolExecutor(max_workers=INSIGHTS_WORKERS) as pool:
         futures = {
-            pool.submit(fetch_live_movies, "daily", target.isoformat()): target.isoformat()
+            pool.submit(get_live_box_office, "daily", target.isoformat()): target.isoformat()
             for target in requested_dates
         }
         for future in as_completed(futures):
             target = futures[future]
             try:
-                daily_movies[target] = future.result()
+                daily_movies[target], daily_meta[target] = future.result()
             except ApiFailure as failure:
                 failures.append(failure)
             except Exception:
@@ -221,7 +400,12 @@ def fetch_live_insights(end_date: date, days: int, limit: int) -> dict:
     if failures:
         # Never report a partial range as a complete insight result.
         priority = next((failure for failure in failures if failure.status in {503, 504}), failures[0])
-        raise ApiFailure(priority.status, "INSIGHTS_INCOMPLETE", "일부 날짜의 박스오피스 데이터를 확인하지 못해 인사이트를 계산하지 못했습니다.", True)
+        warnings = {failure.warning["message"] for failure in failures if failure.warning}
+        warning = {
+            "code": "INSIGHTS_STORAGE_WARNING",
+            "message": " ".join(sorted(warnings)),
+        } if warnings else None
+        raise ApiFailure(priority.status, "INSIGHTS_INCOMPLETE", "일부 날짜의 박스오피스 데이터를 확인하지 못해 인사이트를 계산하지 못했습니다.", True, warning)
 
     series = []
     totals_by_movie: dict[str, dict] = {}
@@ -259,6 +443,8 @@ def fetch_live_insights(end_date: date, days: int, limit: int) -> dict:
             "share": movie["revenue"] / total_revenue if total_revenue else 0,
         })
 
+    sources = {item.get("source") for item in daily_meta.values()}
+    aggregate_source = next(iter(sources)) if len(sources) == 1 else "KOBIS Open API 및 저장된 데이터 (Supabase)"
     return {
         "data": {
             "series": series,
@@ -271,12 +457,16 @@ def fetch_live_insights(end_date: date, days: int, limit: int) -> dict:
         },
         "meta": {
             "mode": "live",
-            "source": "KOBIS Open API",
+            "source": aggregate_source,
             "rangeStart": start_date.isoformat(),
             "rangeEnd": end_date.isoformat(),
             "daysRequested": days,
             "daysComplete": len(daily_movies),
             "collectedAt": now_seoul(),
+            **({"warning": {
+                "code": "INSIGHTS_STORAGE_WARNING",
+                "message": " ".join(sorted({item["warning"]["message"] for item in daily_meta.values() if item.get("warning")})),
+            }} if any(item.get("warning") for item in daily_meta.values()) else {}),
         },
     }
 
@@ -300,10 +490,14 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def fail(self, failure: ApiFailure) -> None:
+    def fail(self, failure: ApiFailure, warning: dict | None = None) -> None:
+        error_meta = {"mode": DATA_MODE or "disabled"}
+        effective_warning = warning or failure.warning
+        if effective_warning:
+            error_meta["warning"] = effective_warning
         self.send_json(failure.status, {
             "error": {"code": failure.code, "message": failure.message, "retryable": failure.retryable},
-            "meta": {"mode": DATA_MODE or "disabled"},
+            "meta": error_meta,
         }, "30" if failure.code == "KOBIS_RATE_LIMITED" else None)
 
     def do_GET(self) -> None:
@@ -350,28 +544,33 @@ class Handler(SimpleHTTPRequestHandler):
             if query:
                 movies = [movie for movie in movies if query.casefold() in movie["title"].casefold()]
             source = "KOBIS 공개 API 샘플 fixture (DATA_MODE=demo)"
+            collected_at = now_seoul()
+            meta_extra = {"cache": {"status": "demo", "persisted": False}}
         else:
             try:
-                movies = fetch_live_movies(period, date_value)
+                movies, meta_extra = get_live_box_office(period, date_value)
             except ApiFailure as failure:
                 return self.fail(failure)
             total_before_search = len(movies)
             if query:
                 movies = [movie for movie in movies if query.casefold() in movie["title"].casefold()]
-            source = "KOBIS Open API"
+            source = meta_extra.pop("source")
+            collected_at = meta_extra.pop("collectedAt")
 
+        response_meta = {
+            "mode": DATA_MODE,
+            "date": date_value,
+            "period": period,
+            "query": query or None,
+            "total": len(movies),
+            "totalBeforeSearch": total_before_search,
+            "source": source,
+            "collectedAt": collected_at,
+            **meta_extra,
+        }
         self.send_json(200, {
             "data": {"movies": movies},
-            "meta": {
-                "mode": DATA_MODE,
-                "date": date_value,
-                "period": period,
-                "query": query or None,
-                "total": len(movies),
-                "totalBeforeSearch": total_before_search,
-                "source": source,
-                "collectedAt": now_seoul(),
-            },
+            "meta": response_meta,
         })
 
     def handle_insights(self, raw_query: str) -> None:
