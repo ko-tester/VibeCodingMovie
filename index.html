@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f4f6fa" />
+  <title>Boxoffice — 영화 흥행 인사이트</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="박스오피스 홈"><span class="brand-mark">B</span><span>boxoffice<span class="brand-dot">.</span></span></a>
+      <p class="side-label">WORKSPACE</p>
+      <nav class="side-nav" aria-label="주 메뉴">
+        <button class="nav-item active" data-view="list"><span class="nav-icon">▤</span>박스오피스</button>
+        <button class="nav-item" data-view="insights"><span class="nav-icon">◩</span>인사이트</button>
+      </nav>
+      <div class="side-bottom">
+        <div class="side-note"><span class="live-dot"></span><div><b>샘플 데이터</b><small>KOBIS 연결 전 데모</small></div></div>
+        <div class="profile"><div class="avatar">영</div><div><b>영화 인사이트</b><small>데모 워크스페이스</small></div><span class="dots">···</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar"><div class="breadcrumbs">대시보드 <span>/</span> <b id="crumb">박스오피스</b></div><div class="top-actions"><span class="sample-pill"><i></i> 예시 데이터</span><button class="icon-button" aria-label="알림">♧<span class="notify"></span></button><div class="avatar small">영</div></div></header>
+      <section class="page list-view" id="listView">
+        <div class="page-heading"><div><p class="eyebrow">KOREAN BOX OFFICE</p><h1>박스오피스</h1><p class="subheading">날짜별 흥행 순위와 관객 흐름을 살펴보세요.</p></div><button class="export-button" id="exportBtn"><span>↧</span> 내보내기</button></div>
+        <div class="demo-banner"><span class="banner-icon">✦</span><div><b>데모 미리보기</b><p>화면에 표시된 수치는 모두 가상 샘플입니다. 실제 KOBIS 데이터가 아닙니다.</p></div><button class="banner-close" aria-label="안내 닫기">×</button></div>
+        <div class="section-title-row"><div><h2 id="periodTitle">일간 박스오피스</h2><p>조회 조건을 선택해 순위와 실적을 확인하세요.</p></div><span class="update-label"><span class="live-dot"></span> 샘플 조회 결과</span></div>
+        <div class="filter-card">
+          <div class="filter-field date-field"><label for="dateInput">조회 날짜</label><div class="input-wrap"><span class="field-icon">▦</span><input type="date" id="dateInput" value="2026-09-05" /></div></div>
+          <div class="filter-field period-field"><label>기간 유형</label><div class="segmented" role="group" aria-label="기간 유형"><button class="seg active" data-period="daily">일간</button><button class="seg" data-period="weekly">주간</button><button class="seg" data-period="weekend">주말</button></div></div>
+          <div class="filter-field search-field"><label for="searchInput">영화 검색</label><div class="input-wrap search-wrap"><span class="field-icon">⌕</span><input id="searchInput" type="search" placeholder="영화명을 입력하세요" /><button id="clearSearch" aria-label="검색어 지우기" hidden>×</button></div></div>
+          <button class="primary-button" id="searchBtn"><span>⌕</span> 조회하기</button>
+        </div>
+        <div class="summary-grid" id="summaryGrid">
+          <article class="summary-card"><div class="summary-top"><span>총 매출</span><span class="summary-icon purple">₩</span></div><strong id="sumRevenue">₩ 0</strong><small><span class="trend up">↑ 12.8%</span> 전일 대비</small></article>
+          <article class="summary-card"><div class="summary-top"><span>총 관객수</span><span class="summary-icon blue">♙</span></div><strong id="sumAudience">0명</strong><small><span class="trend up">↑ 8.3%</span> 전일 대비</small></article>
+          <article class="summary-card"><div class="summary-top"><span>상영 영화</span><span class="summary-icon orange">▣</span></div><strong id="sumMovies">0편</strong><small>조회 조건 기준</small></article>
+          <article class="summary-card"><div class="summary-top"><span>1위 영화</span><span class="summary-icon green">↗</span></div><strong class="leader-title" id="sumLeader">—</strong><small>일간 박스오피스</small></article>
+        </div>
+        <section class="table-card" aria-label="박스오피스 목록">
+          <div class="table-head"><div><h3>영화별 순위</h3><p id="resultCaption">2026년 10월 24일 기준 · 일간</p></div><div class="table-tools"><span id="resultCount">0개 영화</span><button class="more-button" aria-label="더 보기">···</button></div></div>
+          <div class="dataset-meta" aria-live="polite" aria-label="조회 정보">
+            <div><span>조회 건수</span><strong id="datasetCount">—</strong></div>
+            <div><span>출처</span><strong id="datasetSource">KOBIS 샘플 데이터</strong></div>
+            <div><span>수집 시각</span><strong id="datasetCollected">—</strong></div>
+          </div>
+          <div id="resultsRegion" aria-live="polite"><div class="table-scroll"><table><thead><tr><th class="rank-col">순위</th><th>영화명</th><th>개봉일</th><th class="numeric">매출액</th><th class="numeric">관객수</th><th class="numeric">누적 관객수</th><th></th></tr></thead><tbody id="filmRows"></tbody></table></div></div>
+          <div class="table-footer"><span id="footerCount">전체 0편</span><div class="pagination"><button disabled>‹</button><button class="page-number">1</button><button disabled>›</button></div></div>
+        </section>
+      </section>
+
+      <section class="page insights-view" id="insightsView" hidden>
+        <div class="page-heading"><div><p class="eyebrow">BOX OFFICE ANALYTICS</p><h1>흥행 인사이트</h1><p class="subheading">기간별 매출과 관객 흐름을 비교해 보세요.</p></div><div class="insight-date">▦ <span>2026. 10. 24 기준</span></div></div>
+        <div class="demo-banner"><span class="banner-icon">✦</span><div><b>데모 미리보기</b><p>차트와 지표는 가상 샘플을 바탕으로 표시합니다.</p></div><button class="banner-close" aria-label="안내 닫기">×</button></div>
+        <div class="insight-controls"><div><h2>매출 추이</h2><p>선택 기간의 일별 박스오피스 매출 합계</p></div><div class="segmented range-tabs" role="group" aria-label="조회 기간"><button class="seg active" data-range="7">7일</button><button class="seg" data-range="14">14일</button><button class="seg" data-range="30">30일</button></div></div>
+        <div class="insight-grid"><section class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">기간 총매출</span><h3 id="chartTotal">₩ 0</h3></div><span class="chart-change">↑ 9.4% <small>이전 기간 대비</small></span></div><div class="chart-wrap"><div class="y-labels"><span>₩ 60억</span><span>₩ 40억</span><span>₩ 20억</span><span>₩ 0</span></div><div class="chart" id="revenueChart" aria-label="일별 매출 추이 차트"></div></div><div class="chart-x-labels" id="chartLabels"></div></section>
+          <section class="metric-stack"><article class="summary-card"><div class="summary-top"><span>기간 총관객수</span><span class="summary-icon blue">♙</span></div><strong id="periodAudience">0명</strong><small>선택 기간 합계</small></article><article class="summary-card"><div class="summary-top"><span>일평균 매출</span><span class="summary-icon purple">₩</span></div><strong id="averageRevenue">₩ 0</strong><small>선택 기간 일평균</small></article></section></div>
+        <section class="table-card top-films"><div class="table-head"><div><h3>기간별 흥행 영화</h3><p>선택한 기간의 누적 매출 기준</p></div><div class="segmented top-tabs" role="group" aria-label="Top 영화 개수"><button class="seg active" data-top="5">Top 5</button><button class="seg" data-top="10">Top 10</button></div></div><div class="table-scroll"><table><thead><tr><th>순위</th><th>영화명</th><th>매출액</th><th>관객수</th><th>점유율</th></tr></thead><tbody id="topRows"></tbody></table></div></section>
+      </section>
+      <footer class="app-footer"><span>BOXOFFICE INSIGHTS</span><span>KOBIS 공개 데이터 기반 서비스 · 데모는 가상 데이터</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
